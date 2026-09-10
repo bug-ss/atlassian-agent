@@ -258,13 +258,15 @@ class LoopbackOAuthFlow:
         self._result = loop.create_future()
         try:
             self._server = await asyncio.start_server(
-                self._handle_request, "127.0.0.1", self.settings.callback_port
+                self._handle_request, self.settings.callback_host, self.settings.callback_port
             )
         except OSError as exc:
             raise OAuthCallbackError(
                 f"Cannot listen on {self.settings.redirect_uri} ({exc}). "
                 "Free the port, or set ATLASSIAN_OAUTH_CALLBACK_PORT to another one "
-                "(the new redirect URI is registered with Atlassian on next login)."
+                "(Atlassian accepts any loopback port; the new redirect URI is "
+                "registered on next login). If nothing may listen at all, use the "
+                "paste-back flow instead - `atlassian-agent --login --paste-code`."
             ) from exc
 
     async def _stop_server(self) -> None:
@@ -379,6 +381,73 @@ def _escape(text: str) -> str:
     )
 
 
+class ManualPasteFlow:
+    """Authorization without listening on any socket.
+
+    Prints the authorization URL, you complete consent in whatever browser you
+    like - on another machine if need be - and paste the URL you land on back
+    into the terminal. The browser will show a connection error on that final
+    redirect, which is expected and harmless: the code is in its address bar,
+    and that is all we need.
+
+    Use this where a loopback listener is impossible: a locked-down host, a
+    container with no port mapping, or a remote shell with no way to forward a
+    port back.
+    """
+
+    def __init__(self, settings: Settings, *, reader: Callable[[str], str] | None = None) -> None:
+        self.settings = settings
+        self._reader = reader or input
+
+    async def redirect_handler(self, authorization_url: str) -> None:
+        print("\nOpen this URL in any browser and approve the request:\n")
+        print(f"  {authorization_url}\n")
+        print(
+            f"You will be redirected to {self.settings.redirect_uri} and the page will\n"
+            "fail to load. That is expected - copy the full URL out of the address bar."
+        )
+
+    async def callback_handler(self) -> tuple[str, str | None]:
+        raw = (
+            await asyncio.to_thread(self._reader, "\nPaste the full redirect URL here: ")
+        ).strip()
+        return parse_redirect_response(raw)
+
+
+def parse_redirect_response(raw: str) -> tuple[str, str | None]:
+    """Pull `code` and `state` out of a pasted redirect URL.
+
+    Raises with a usable message rather than letting a half-pasted value fail
+    later as an opaque state mismatch.
+    """
+    if not raw:
+        raise OAuthCallbackError("Nothing pasted; the login was not completed.")
+
+    query = urlsplit(raw).query or (raw if "=" in raw else "")
+    params = parse_qs(query)
+
+    error = _first(params, "error")
+    if error:
+        description = _first(params, "error_description")
+        detail = f"{error}: {description}" if description else error
+        raise OAuthCallbackError(f"Atlassian refused the authorization request ({detail})")
+
+    code = _first(params, "code")
+    if not code:
+        raise OAuthCallbackError(
+            "That does not look like a redirect URL - no `code` parameter found. "
+            "Paste the entire URL from the browser's address bar, starting with http."
+        )
+
+    state = _first(params, "state")
+    if not state:
+        raise OAuthCallbackError(
+            "The pasted URL has a `code` but no `state`. Paste the whole URL, "
+            "unmodified - `state` is what proves the response belongs to this login."
+        )
+    return code, state
+
+
 # ---------------------------------------------------------------------------
 # Provider
 # ---------------------------------------------------------------------------
@@ -471,15 +540,18 @@ def build_oauth_provider(
     *,
     storage: TokenStorage | None = None,
     open_browser: bool = True,
+    manual_paste: bool = False,
     redirect_handler: RedirectHandler | None = None,
     callback_handler: CallbackHandler | None = None,
 ) -> AtlassianOAuthProvider:
     """Assemble the `httpx.Auth` that authorizes every request to the MCP server.
 
     By default the browser half runs through `LoopbackOAuthFlow`, which suits a
-    CLI or a desktop app. Pass your own `redirect_handler` / `callback_handler`
-    to host the flow somewhere else - a web app that redirects the user and
-    resumes on its own callback route, or a test that captures the URL.
+    CLI or a desktop app. `manual_paste=True` swaps in `ManualPasteFlow`, which
+    needs no listening socket at all. Pass your own `redirect_handler` /
+    `callback_handler` to host the flow somewhere else - a web app that
+    redirects the user and resumes on its own callback route, or a test that
+    captures the URL.
     """
     if (redirect_handler is None) != (callback_handler is None):
         raise ValueError(
@@ -487,7 +559,11 @@ def build_oauth_provider(
             "whoever sends the user out is also the one who gets the code back."
         )
     if redirect_handler is None or callback_handler is None:
-        flow = LoopbackOAuthFlow(settings, open_browser=open_browser)
+        flow: LoopbackOAuthFlow | ManualPasteFlow = (
+            ManualPasteFlow(settings)
+            if manual_paste
+            else LoopbackOAuthFlow(settings, open_browser=open_browser)
+        )
         redirect_handler, callback_handler = flow.redirect_handler, flow.callback_handler
 
     return AtlassianOAuthProvider(

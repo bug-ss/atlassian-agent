@@ -154,6 +154,7 @@ async def create_atlassian_agent(
     checkpointer: Any | None = None,
     extra_tools: Sequence[BaseTool] = (),
     open_browser: bool = True,
+    manual_paste: bool = False,
     **agent_kwargs: Any,
 ) -> AtlassianAgent:
     """Authorize, load the Atlassian tool catalog, and compile an agent.
@@ -162,7 +163,7 @@ async def create_atlassian_agent(
     reuse the cached tokens until the refresh token itself expires.
     """
     settings = settings or Settings.from_env()
-    client = build_mcp_client(settings, open_browser=open_browser)
+    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
     tools = [*await load_atlassian_tools(client), *extra_tools]
     agent = build_agent(
         tools,
@@ -185,6 +186,7 @@ async def atlassian_agent_session(
     checkpointer: Any | None = None,
     extra_tools: Sequence[BaseTool] = (),
     open_browser: bool = True,
+    manual_paste: bool = False,
     **agent_kwargs: Any,
 ) -> AsyncIterator[AtlassianAgent]:
     """Same agent, but over a single MCP session held open for the block.
@@ -193,7 +195,7 @@ async def atlassian_agent_session(
     handshake for the whole conversation instead of per tool call.
     """
     settings = settings or Settings.from_env()
-    client = build_mcp_client(settings, open_browser=open_browser)
+    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
     async with client.session(SERVER_NAME) as session:
         tools = [*await load_mcp_tools(session), *extra_tools]
         logger.info("Loaded %d Atlassian tools over a persistent session", len(tools))

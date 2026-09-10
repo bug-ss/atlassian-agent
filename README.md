@@ -61,9 +61,10 @@ One-shot:
 atlassian-agent "List my open bugs in the Platform project"
 ```
 
-On a headless box, `--no-browser` prints the URL for you to open elsewhere.
-The redirect still has to reach `http://localhost:8901/oauth/callback` on the
-machine running the agent, so forward that port if you are on SSH.
+On a headless box, `--no-browser` prints the URL for you to open elsewhere. The
+redirect still has to reach `http://127.0.0.1:8901/oauth/callback` on the machine
+running the agent - if it cannot, see
+[When the loopback callback is blocked](#when-the-loopback-callback-is-blocked).
 
 ## Using it as a library
 
@@ -164,6 +165,65 @@ read-only agent. Changing scopes invalidates the cached login on purpose, so the
 next run re-registers and re-consents rather than replaying a token that no
 longer matches.
 
+## When the loopback callback is blocked
+
+If nothing can listen on `127.0.0.1:8901`, or the browser cannot reach it, you
+have several options. Atlassian is permissive about redirect URIs - its
+registration endpoint and `/authorize` both accept any loopback host, any port,
+public HTTPS URLs, custom schemes and the OOB URN - so the constraint is almost
+always local.
+
+**1. Move the port.** Any port works.
+
+```bash
+ATLASSIAN_OAUTH_CALLBACK_PORT=53101 atlassian-agent --login
+```
+
+**2. Move the host.** The default is the literal `127.0.0.1` rather than
+`localhost`, per RFC 8252 §8.3 - `localhost` depends on the resolver and often
+resolves to `::1` first, which misses an IPv4-only listener. If your setup wants
+the opposite, flip it:
+
+```bash
+ATLASSIAN_OAUTH_CALLBACK_HOST=localhost atlassian-agent --login   # or ::1
+```
+
+**3. Paste the code back instead of listening at all.** This binds no socket:
+
+```bash
+atlassian-agent --login --paste-code
+```
+
+It prints the URL, you approve in any browser on any machine, and paste the URL
+you land on back into the terminal. That final page will fail to load - that is
+expected and harmless; the code is in the address bar and that is all it needs.
+Paste the **whole** URL: the `state` parameter is what proves the response
+belongs to your login, and the flow refuses a bare code without it.
+
+**4. Forward the port**, if the agent is on a remote host and the browser is
+local:
+
+```bash
+ssh -L 8901:127.0.0.1:8901 you@remote-host
+```
+
+**5. Use a public HTTPS callback**, if you are running this behind a web service.
+Point `ATLASSIAN_OAUTH_CALLBACK_*` at your own route and supply your own
+handlers via `build_oauth_provider(redirect_handler=..., callback_handler=...)`.
+
+**6. Skip OAuth entirely** with an Atlassian API token or service-account key,
+if the agent should act as one service identity rather than on behalf of each
+user. An org admin must first enable this under Atlassian Administration → Rovo
+→ Rovo MCP server → Authentication. It is also the only way to reach Jira
+Service Management tools, which do not support OAuth 2.1.
+
+Note that **the device authorization grant is not an option** - Atlassian's
+authorization server metadata does not list `device_code` among its supported
+grant types.
+
+Changing the host, port or path changes the registered redirect URI, so the next
+login re-registers and re-consents. That is deliberate, not a bug.
+
 ## Configuration
 
 Everything has a default; only `ANTHROPIC_API_KEY` is strictly required.
@@ -174,7 +234,8 @@ Everything has a default; only `ANTHROPIC_API_KEY` is strictly required.
 | `ATLASSIAN_AGENT_MODEL` | `anthropic:claude-opus-5` | Any `init_chat_model` string |
 | `ATLASSIAN_MCP_URL` | `https://mcp.atlassian.com/v2/mcp` | `/v1/sse` is retired after 2026-06-30 |
 | `ATLASSIAN_OAUTH_SCOPES` | least-privilege set above | Space/comma separated, or `auto` |
-| `ATLASSIAN_OAUTH_CALLBACK_PORT` | `8901` | Part of the registered redirect URI |
+| `ATLASSIAN_OAUTH_CALLBACK_HOST` | `127.0.0.1` | Part of the registered redirect URI |
+| `ATLASSIAN_OAUTH_CALLBACK_PORT` | `8901` | Any port works; part of the redirect URI |
 | `ATLASSIAN_OAUTH_CALLBACK_PATH` | `/oauth/callback` | |
 | `ATLASSIAN_OAUTH_TIMEOUT` | `300` | Seconds to finish the browser flow |
 | `ATLASSIAN_TOKEN_CACHE` | `~/.atlassian-agent/tokens.json` | Written `0600` |

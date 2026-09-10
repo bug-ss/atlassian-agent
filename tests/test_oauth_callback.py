@@ -8,11 +8,13 @@ from atlassian_agent.config import Settings
 from atlassian_agent.oauth import (
     AtlassianOAuthProvider,
     LoopbackOAuthFlow,
+    ManualPasteFlow,
     OAuthCallbackError,
     PinnedScopeClientMetadata,
     build_client_metadata,
     build_oauth_provider,
     build_token_storage,
+    parse_redirect_response,
 )
 
 
@@ -204,3 +206,64 @@ def test_half_a_custom_flow_is_rejected(settings):
 
     with pytest.raises(ValueError, match="must be supplied together"):
         build_oauth_provider(settings, redirect_handler=redirect)
+
+
+# -- paste-back flow (no listening socket) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "http://127.0.0.1:8901/oauth/callback?code=abc&state=xyz",
+        "http://localhost:8901/oauth/callback?code=abc&state=xyz#",
+        "code=abc&state=xyz",
+    ],
+)
+def test_parse_accepts_the_shapes_people_actually_paste(pasted):
+    assert parse_redirect_response(pasted) == ("abc", "xyz")
+
+
+def test_parse_reports_an_authorization_error():
+    with pytest.raises(OAuthCallbackError, match="invalid_scope: Unknown scope"):
+        parse_redirect_response(
+            "http://127.0.0.1:8901/cb?error=invalid_scope&error_description=Unknown+scope"
+        )
+
+
+def test_parse_rejects_a_bare_code_without_state():
+    """Dropping state would defeat the CSRF check the SDK performs."""
+    with pytest.raises(OAuthCallbackError, match="no `state`"):
+        parse_redirect_response("http://127.0.0.1:8901/cb?code=abc")
+
+
+@pytest.mark.parametrize("pasted", ["", "   ", "not a url"])
+def test_parse_rejects_junk_with_instructions(pasted):
+    with pytest.raises(OAuthCallbackError):
+        parse_redirect_response(pasted)
+
+
+async def test_paste_flow_needs_no_socket(settings, capsys):
+    """The whole point: authorize with nothing listening on the callback port."""
+    flow = ManualPasteFlow(
+        settings, reader=lambda _: "http://127.0.0.1:8901/oauth/callback?code=c1&state=s1"
+    )
+
+    await flow.redirect_handler("https://auth.atlassian.com/authorize?x=1")
+    assert "https://auth.atlassian.com/authorize?x=1" in capsys.readouterr().out
+
+    assert await flow.callback_handler() == ("c1", "s1")
+
+    # Nothing was ever bound.
+    with pytest.raises((ConnectionRefusedError, OSError)):
+        _, writer = await asyncio.open_connection("127.0.0.1", settings.callback_port)
+        writer.close()
+
+
+def test_manual_paste_selects_the_paste_flow(settings):
+    provider = build_oauth_provider(settings, manual_paste=True)
+    assert provider.context.callback_handler.__self__.__class__ is ManualPasteFlow
+
+
+def test_loopback_is_still_the_default(settings):
+    provider = build_oauth_provider(settings, open_browser=False)
+    assert provider.context.callback_handler.__self__.__class__ is LoopbackOAuthFlow

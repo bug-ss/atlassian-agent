@@ -31,6 +31,7 @@ def build_connection(
     *,
     auth: httpx.Auth | None = None,
     open_browser: bool = True,
+    manual_paste: bool = False,
 ) -> StreamableHttpConnection:
     """Describe the Atlassian MCP endpoint, with OAuth attached to the transport."""
     connection: StreamableHttpConnection = {
@@ -38,7 +39,7 @@ def build_connection(
         "url": settings.mcp_url,
         "auth": auth
         if auth is not None
-        else build_oauth_provider(settings, open_browser=open_browser),
+        else build_oauth_provider(settings, open_browser=open_browser, manual_paste=manual_paste),
         "timeout": settings.request_timeout,
         "sse_read_timeout": settings.sse_read_timeout,
     }
@@ -52,6 +53,7 @@ def build_mcp_client(
     *,
     auth: httpx.Auth | None = None,
     open_browser: bool = True,
+    manual_paste: bool = False,
     **client_kwargs: Any,
 ) -> MultiServerMCPClient:
     """A `MultiServerMCPClient` holding one authorized Atlassian connection.
@@ -60,7 +62,9 @@ def build_mcp_client(
     `OAuthClientProvider` instance, so every session made from this client
     shares the same in-memory access token rather than re-reading the cache.
     """
-    connection = build_connection(settings, auth=auth, open_browser=open_browser)
+    connection = build_connection(
+        settings, auth=auth, open_browser=open_browser, manual_paste=manual_paste
+    )
     return MultiServerMCPClient({SERVER_NAME: connection}, **client_kwargs)
 
 

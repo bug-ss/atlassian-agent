@@ -57,6 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the authorization URL instead of launching a browser",
     )
     parser.add_argument(
+        "--paste-code",
+        action="store_true",
+        help=(
+            "Authorize without listening on a port: open the URL anywhere, then "
+            "paste the redirect URL back. Use when the loopback callback is blocked."
+        ),
+    )
+    parser.add_argument(
         "--hide-tool-calls",
         action="store_true",
         help="Don't show tool calls as the agent makes them",
@@ -121,8 +129,8 @@ async def cmd_logout(settings: Settings) -> int:
     return 0
 
 
-async def cmd_login(settings: Settings, *, open_browser: bool) -> int:
-    client = build_mcp_client(settings, open_browser=open_browser)
+async def cmd_login(settings: Settings, *, open_browser: bool, manual_paste: bool = False) -> int:
+    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
     async with client.session(SERVER_NAME) as session:
         result = await session.list_tools()
     info = token_status(settings)
@@ -136,8 +144,10 @@ async def cmd_login(settings: Settings, *, open_browser: bool) -> int:
     return 0
 
 
-async def cmd_list_tools(settings: Settings, *, open_browser: bool) -> int:
-    client = build_mcp_client(settings, open_browser=open_browser)
+async def cmd_list_tools(
+    settings: Settings, *, open_browser: bool, manual_paste: bool = False
+) -> int:
+    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
     async with client.session(SERVER_NAME) as session:
         result = await session.list_tools()
     for tool in sorted(result.tools, key=lambda t: t.name):
@@ -195,10 +205,19 @@ async def run_turn(
 
 
 async def cmd_once(
-    settings: Settings, query: str, *, system_prompt: str, open_browser: bool, show_tools: bool
+    settings: Settings,
+    query: str,
+    *,
+    system_prompt: str,
+    open_browser: bool,
+    show_tools: bool,
+    manual_paste: bool = False,
 ) -> int:
     async with atlassian_agent_session(
-        settings, system_prompt=system_prompt, open_browser=open_browser
+        settings,
+        system_prompt=system_prompt,
+        open_browser=open_browser,
+        manual_paste=manual_paste,
     ) as holder:
         answer = await run_turn(holder, query, config=None, show_tool_calls=show_tools)
     print(answer or "(no answer)")
@@ -206,7 +225,12 @@ async def cmd_once(
 
 
 async def cmd_repl(
-    settings: Settings, *, system_prompt: str, open_browser: bool, show_tools: bool
+    settings: Settings,
+    *,
+    system_prompt: str,
+    open_browser: bool,
+    show_tools: bool,
+    manual_paste: bool = False,
 ) -> int:
     from langgraph.checkpoint.memory import InMemorySaver
 
@@ -216,6 +240,7 @@ async def cmd_repl(
         settings,
         system_prompt=system_prompt,
         open_browser=open_browser,
+        manual_paste=manual_paste,
         checkpointer=checkpointer,
     ) as holder:
         print(f"\n{REPL_BANNER}\n{len(holder.tools)} tools loaded.\n")
@@ -281,15 +306,16 @@ async def async_main(argv: list[str] | None = None) -> int:
 
     open_browser = not args.no_browser
     show_tools = not args.hide_tool_calls
+    manual_paste = args.paste_code
 
     if args.logout:
         return await cmd_logout(settings)
     if args.status:
         return await cmd_status(settings)
     if args.login:
-        return await cmd_login(settings, open_browser=open_browser)
+        return await cmd_login(settings, open_browser=open_browser, manual_paste=manual_paste)
     if args.list_tools:
-        return await cmd_list_tools(settings, open_browser=open_browser)
+        return await cmd_list_tools(settings, open_browser=open_browser, manual_paste=manual_paste)
 
     system_prompt = resolve_system_prompt(args)
     if args.query:
@@ -299,9 +325,14 @@ async def async_main(argv: list[str] | None = None) -> int:
             system_prompt=system_prompt,
             open_browser=open_browser,
             show_tools=show_tools,
+            manual_paste=manual_paste,
         )
     return await cmd_repl(
-        settings, system_prompt=system_prompt, open_browser=open_browser, show_tools=show_tools
+        settings,
+        system_prompt=system_prompt,
+        open_browser=open_browser,
+        show_tools=show_tools,
+        manual_paste=manual_paste,
     )
 
 

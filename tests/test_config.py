@@ -12,9 +12,26 @@ def test_defaults_target_the_v2_endpoint_and_request_offline_access():
     assert "offline_access" in settings.scopes
 
 
-def test_redirect_uri_is_built_from_port_and_path():
+def test_redirect_uri_is_built_from_host_port_and_path():
     settings = Settings(callback_port=9000, callback_path="/cb")
-    assert settings.redirect_uri == "http://localhost:9000/cb"
+    # RFC 8252 8.3: prefer the literal loopback address over the name
+    # "localhost", which can resolve to ::1 and miss an IPv4-only listener.
+    assert settings.redirect_uri == "http://127.0.0.1:9000/cb"
+
+
+def test_callback_host_is_configurable(monkeypatch):
+    monkeypatch.setenv("ATLASSIAN_OAUTH_CALLBACK_HOST", "localhost")
+    assert Settings.from_env().redirect_uri.startswith("http://localhost:")
+
+
+def test_ipv6_callback_host_is_bracketed():
+    settings = Settings(callback_host="::1", callback_port=9000, callback_path="/cb")
+    assert settings.redirect_uri == "http://[::1]:9000/cb"
+
+
+def test_empty_callback_host_is_rejected():
+    with pytest.raises(ValueError, match="callback host"):
+        Settings(callback_host="").validate()
 
 
 @pytest.mark.parametrize("raw", ["a b c", "a,b,c", " a , b ,c "])

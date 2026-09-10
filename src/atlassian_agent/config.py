@@ -50,6 +50,13 @@ DEFAULT_MODEL = "anthropic:claude-opus-5"
 DEFAULT_CALLBACK_PORT = 8901
 DEFAULT_CALLBACK_PATH = "/oauth/callback"
 
+# RFC 8252 section 8.3 recommends native apps use the literal loopback address
+# rather than the name "localhost", because "localhost" depends on the host's
+# resolver: it commonly resolves to ::1 first, and a client listening only on
+# 127.0.0.1 then gets an unreachable redirect. Atlassian accepts either, plus
+# any port, so the literal address is the safer default.
+DEFAULT_CALLBACK_HOST = "127.0.0.1"
+
 DEFAULT_TOKEN_CACHE = Path.home() / ".atlassian-agent" / "tokens.json"
 
 
@@ -98,6 +105,7 @@ class Settings:
     scopes: tuple[str, ...] = DEFAULT_SCOPES
     model: str = DEFAULT_MODEL
     token_cache_path: Path = DEFAULT_TOKEN_CACHE
+    callback_host: str = DEFAULT_CALLBACK_HOST
     callback_port: int = DEFAULT_CALLBACK_PORT
     callback_path: str = DEFAULT_CALLBACK_PATH
     client_name: str = "Atlassian LangChain Agent"
@@ -111,7 +119,8 @@ class Settings:
     @property
     def redirect_uri(self) -> str:
         """The loopback URI registered with Atlassian and served by `oauth.py`."""
-        return f"http://localhost:{self.callback_port}{self.callback_path}"
+        host = f"[{self.callback_host}]" if ":" in self.callback_host else self.callback_host
+        return f"http://{host}:{self.callback_port}{self.callback_path}"
 
     @property
     def scope_string(self) -> str:
@@ -131,6 +140,7 @@ class Settings:
             token_cache_path=Path(
                 _env_str("ATLASSIAN_TOKEN_CACHE", str(DEFAULT_TOKEN_CACHE))
             ).expanduser(),
+            callback_host=_env_str("ATLASSIAN_OAUTH_CALLBACK_HOST", DEFAULT_CALLBACK_HOST),
             callback_port=_env_int("ATLASSIAN_OAUTH_CALLBACK_PORT", DEFAULT_CALLBACK_PORT),
             callback_path=_env_str("ATLASSIAN_OAUTH_CALLBACK_PATH", DEFAULT_CALLBACK_PATH),
             client_name=_env_str("ATLASSIAN_OAUTH_CLIENT_NAME", "Atlassian LangChain Agent"),
@@ -150,6 +160,8 @@ class Settings:
             raise ValueError(f"callback path must start with '/', got {self.callback_path!r}")
         if not 1 <= self.callback_port <= 65535:
             raise ValueError(f"callback port out of range: {self.callback_port}")
+        if not self.callback_host:
+            raise ValueError("callback host must not be empty")
         for scope in self.scopes:
             if scope.split() != [scope]:
                 raise ValueError(f"scope entries must not contain whitespace: {scope!r}")
