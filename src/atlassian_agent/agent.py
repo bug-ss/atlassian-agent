@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
@@ -155,15 +156,22 @@ async def create_atlassian_agent(
     extra_tools: Sequence[BaseTool] = (),
     open_browser: bool = True,
     manual_paste: bool = False,
+    auth: httpx.Auth | None = None,
     **agent_kwargs: Any,
 ) -> AtlassianAgent:
     """Authorize, load the Atlassian tool catalog, and compile an agent.
 
     The first call opens a browser for the OAuth consent screen; later calls
     reuse the cached tokens until the refresh token itself expires.
+
+    Pass `auth` to supply your own `httpx.Auth` - a provider scoped to one
+    end user, say - instead of the process-wide default. That is how a server
+    acts on behalf of many people from one process.
     """
     settings = settings or Settings.from_env()
-    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
+    client = build_mcp_client(
+        settings, auth=auth, open_browser=open_browser, manual_paste=manual_paste
+    )
     tools = [*await load_atlassian_tools(client), *extra_tools]
     agent = build_agent(
         tools,
@@ -187,6 +195,7 @@ async def atlassian_agent_session(
     extra_tools: Sequence[BaseTool] = (),
     open_browser: bool = True,
     manual_paste: bool = False,
+    auth: httpx.Auth | None = None,
     **agent_kwargs: Any,
 ) -> AsyncIterator[AtlassianAgent]:
     """Same agent, but over a single MCP session held open for the block.
@@ -195,7 +204,9 @@ async def atlassian_agent_session(
     handshake for the whole conversation instead of per tool call.
     """
     settings = settings or Settings.from_env()
-    client = build_mcp_client(settings, open_browser=open_browser, manual_paste=manual_paste)
+    client = build_mcp_client(
+        settings, auth=auth, open_browser=open_browser, manual_paste=manual_paste
+    )
     async with client.session(SERVER_NAME) as session:
         tools = [*await load_mcp_tools(session), *extra_tools]
         logger.info("Loaded %d Atlassian tools over a persistent session", len(tools))

@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv*/
 venv/
 *.egg-info/
 dist/
@@ -13,3 +14,7 @@ build/
 *.token.json
 tokens.json
 .atlassian-agent/
+
+# Default location of the Teams bot's per-user token store
+data/
+user-tokens.json

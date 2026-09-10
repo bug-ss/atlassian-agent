@@ -1,0 +1,46 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "REPLACE_WITH_YOUR_BOT_APP_ID",
+  "packageName": "com.example.atlassianagent",
+  "developer": {
+    "name": "Your Organisation",
+    "websiteUrl": "https://example.com",
+    "privacyUrl": "https://example.com/privacy",
+    "termsOfUseUrl": "https://example.com/terms"
+  },
+  "name": {
+    "short": "Atlassian Agent",
+    "full": "Atlassian Agent for Jira and Confluence"
+  },
+  "description": {
+    "short": "Ask about Jira and Confluence with your own Atlassian permissions.",
+    "full": "Answers questions about Jira, Confluence and the rest of Atlassian Cloud. Each person connects their own Atlassian account, and the agent acts strictly with that person's permissions. Answers are posted into the chat where they were asked, so everyone in that chat can see them."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0052CC",
+  "bots": [
+    {
+      "botId": "REPLACE_WITH_YOUR_BOT_APP_ID",
+      "scopes": ["personal", "team", "groupChat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": ["personal", "team", "groupChat"],
+          "commands": [
+            { "title": "help", "description": "What I can do" },
+            { "title": "status", "description": "Is my Atlassian account connected?" },
+            { "title": "disconnect", "description": "Forget my Atlassian access" }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": ["REPLACE_WITH_YOUR_BOT_HOSTNAME"]
+}

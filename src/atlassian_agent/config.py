@@ -105,6 +105,9 @@ class Settings:
     scopes: tuple[str, ...] = DEFAULT_SCOPES
     model: str = DEFAULT_MODEL
     token_cache_path: Path = DEFAULT_TOKEN_CACHE
+    # Set this when the callback is not a loopback listener - a public HTTPS
+    # route on a bot or web app. It replaces the host/port/path trio entirely.
+    redirect_uri_override: str | None = None
     callback_host: str = DEFAULT_CALLBACK_HOST
     callback_port: int = DEFAULT_CALLBACK_PORT
     callback_path: str = DEFAULT_CALLBACK_PATH
@@ -118,7 +121,9 @@ class Settings:
 
     @property
     def redirect_uri(self) -> str:
-        """The loopback URI registered with Atlassian and served by `oauth.py`."""
+        """The URI registered with Atlassian that receives the authorization code."""
+        if self.redirect_uri_override:
+            return self.redirect_uri_override
         host = f"[{self.callback_host}]" if ":" in self.callback_host else self.callback_host
         return f"http://{host}:{self.callback_port}{self.callback_path}"
 
@@ -140,6 +145,7 @@ class Settings:
             token_cache_path=Path(
                 _env_str("ATLASSIAN_TOKEN_CACHE", str(DEFAULT_TOKEN_CACHE))
             ).expanduser(),
+            redirect_uri_override=os.environ.get("ATLASSIAN_OAUTH_REDIRECT_URI") or None,
             callback_host=_env_str("ATLASSIAN_OAUTH_CALLBACK_HOST", DEFAULT_CALLBACK_HOST),
             callback_port=_env_int("ATLASSIAN_OAUTH_CALLBACK_PORT", DEFAULT_CALLBACK_PORT),
             callback_path=_env_str("ATLASSIAN_OAUTH_CALLBACK_PATH", DEFAULT_CALLBACK_PATH),
@@ -162,6 +168,13 @@ class Settings:
             raise ValueError(f"callback port out of range: {self.callback_port}")
         if not self.callback_host:
             raise ValueError("callback host must not be empty")
+        if self.redirect_uri_override and not self.redirect_uri_override.startswith(
+            ("http://", "https://")
+        ):
+            raise ValueError(
+                f"ATLASSIAN_OAUTH_REDIRECT_URI must be an http(s) URL, "
+                f"got {self.redirect_uri_override!r}"
+            )
         for scope in self.scopes:
             if scope.split() != [scope]:
                 raise ValueError(f"scope entries must not contain whitespace: {scope!r}")

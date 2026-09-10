@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from .agent import DEFAULT_SYSTEM_PROMPT, AtlassianAgent, atlassian_agent_session, final_text
 from .config import Settings
+from .errors import explain as _explain
 from .mcp_client import SERVER_NAME, build_mcp_client
 from .oauth import OAuthCallbackError, build_token_storage, token_status
 
@@ -336,29 +337,9 @@ async def async_main(argv: list[str] | None = None) -> int:
     )
 
 
-def iter_causes(exc: BaseException):
-    """Flatten `ExceptionGroup`s - anyio task groups wrap everything in one."""
-    nested = getattr(exc, "exceptions", None)
-    if nested:
-        for sub in nested:
-            yield from iter_causes(sub)
-    else:
-        yield exc
-
-
 def explain(exc: BaseException) -> str:
-    """The most useful message in an exception tree.
-
-    An MCP session failure surfaces as "unhandled errors in a TaskGroup",
-    which tells the user nothing; the cause they can act on is inside.
-    """
-    causes = list(iter_causes(exc))
-    for cause in causes:
-        if isinstance(cause, (OAuthCallbackError, ValueError, RuntimeError)) and str(cause):
-            return str(cause)
-    if causes:
-        return f"{type(causes[0]).__name__}: {causes[0]}"
-    return str(exc)
+    """The most useful message in an exception tree, for the terminal."""
+    return _explain(exc, prefer=(OAuthCallbackError, ValueError, RuntimeError))
 
 
 def main(argv: list[str] | None = None) -> int:

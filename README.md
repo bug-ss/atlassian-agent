@@ -258,6 +258,83 @@ atlassian-agent [query ...]      ask once, or start a REPL with no query
 
 In the REPL: `/tools`, `/reset`, `/exit`.
 
+## Running it in Microsoft Teams
+
+The `teams` extra hosts the agent as a Teams bot that acts **as whoever sent the
+message**. Each person connects their own Atlassian account once; the bot then
+answers with exactly their Jira and Confluence permissions, and nobody borrows
+anyone else's.
+
+```bash
+pip install -e ".[teams]"     # Python 3.12+ - the Agents SDK requires it
+atlassian-agent-teams          # or: python -m atlassian_agent.teams
+```
+
+### Read this before you deploy it
+
+**Answers are posted into the chat they were asked in.** Atlassian's permission
+model is per-user; a Teams channel is not. If someone asks about a restricted
+issue in a channel, the bot answers *with their access* but *to everyone in the
+room*. That is a deliberate choice of this configuration, not an oversight -
+but it means the channel becomes as trusted as the most sensitive thing anyone
+asks about. Each answer carries a line naming whose access produced it
+(`TEAMS_SHOW_ATTRIBUTION=0` to remove it). To avoid it entirely, have people
+message the bot in a 1:1 chat.
+
+**Sign-in links are personal.** A link is signed, bound to one Teams identity,
+valid for five minutes and usable once. Anyone who opens someone else's link
+would attach *their* Atlassian account to *that person's* Teams identity, so the
+card says so plainly. Hardening it further means delivering the link by direct
+message rather than into the channel - `Proactive.create_conversation` in the
+Agents SDK is the hook for that.
+
+### Setup
+
+1. **Create an Azure Bot** resource with a Microsoft Entra app registration
+   (single- or multi-tenant). Note the app (client) ID, client secret and tenant
+   ID, and set the messaging endpoint to `https://<your-host>/api/messages`.
+2. **Deploy this app** anywhere that gives you a public HTTPS URL, with the
+   environment variables from `.env.example` under the Teams heading. Generate
+   the two secrets with the commands in the comments there and keep the
+   encryption key backed up - losing it means every user reconnects.
+3. **Package the Teams app** from `teams-manifest/` (see its README) and upload
+   it, or have an admin publish it to your org.
+4. **Add the bot** to your group chat or channel and `@mention` it.
+
+The Atlassian redirect URI is `TEAMS_PUBLIC_BASE_URL` + `/oauth/atlassian/callback`.
+Nothing to pre-register on the Atlassian side - the bot registers itself
+dynamically on first use, and that one registration is shared by all users.
+
+### How a turn works
+
+```
+@Atlassian Agent what changed on ENG-412?
+   │
+   ├─ identify the sender        Entra object ID + tenant, stable across chats
+   ├─ look up THEIR grant        encrypted, per-user, found by that key
+   │    └─ none? → sign-in card, bound to them, single-use, 5 minutes
+   ├─ run create_agent           with an OAuth provider scoped to that person
+   └─ post the answer in-channel with an attribution line
+```
+
+Commands: `help`, `status`, `disconnect`.
+
+### Operational notes
+
+- **One provider instance per user is cached and reused.** The MCP SDK
+  serializes token refreshes on a lock held by the provider; building a fresh
+  one per message would let two concurrent messages from the same person
+  refresh independently and race.
+- **The message path can never prompt.** Its OAuth handlers raise instead of
+  opening a browser, so an unconnected user gets a card rather than a request
+  that hangs until it times out.
+- **Sign-in is a two-request handshake in one process.** The flow parks on a
+  future that the callback route resolves, correlated by the `state` the MCP SDK
+  generates. Running multiple replicas needs sticky routing or shared state -
+  the token store is already pluggable, the in-flight login registry is not.
+- **`/api/messages` is JWT-authenticated** by the Bot Framework middleware; the
+  OAuth routes sit outside it and carry their own signed-state check.
+
 ## Notes and limitations
 
 - **Verified against the live server**, end to end through registration, PKCE
@@ -294,6 +371,15 @@ HTTP requests, error params, stray requests, timeouts, busy ports), scope
 pinning, error unwrapping, and the agent loop itself via a scripted model - no
 Atlassian account needed.
 
+Teams tests add sender identification, sign-in token forgery and expiry,
+per-user credential isolation and encryption at rest, and the bot's HTTP surface
+booted for real. They skip automatically without the `teams` extra. One test
+exercises the live Atlassian handshake and is opt-in:
+
+```bash
+ATLASSIAN_LIVE_TESTS=1 pytest tests/test_teams_web.py
+```
+
 ## Layout
 
 ```
@@ -302,5 +388,14 @@ src/atlassian_agent/
   oauth.py       token storage, loopback flow, scope pinning, provider
   mcp_client.py  the MCP connection, with OAuth on the transport
   agent.py       the create_agent harness
+  errors.py      unwrapping anyio ExceptionGroups into readable causes
   cli.py         command line front end
+  teams/
+    identity.py  who sent the message; signed, single-use sign-in links
+    store.py     encrypted per-user grants + the shared registration
+    access.py    per-user providers and agents, and the sign-in handshake
+    web.py       /oauth/atlassian/start and the callback route
+    bot.py       message handlers
+    app.py       aiohttp composition and entry point
+teams-manifest/  Teams app package template
 ```
