@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "atlassian-agent"
+version = "0.1.0"
+description = "A LangChain create_agent harness driving the Atlassian Rovo MCP Server over OAuth 2.1"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "langchain>=1.0",
+    "langchain-anthropic>=1.0",
+    "langchain-mcp-adapters>=0.3.2",
+    "mcp>=1.30",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+atlassian-agent = "atlassian_agent.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlassian_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
